@@ -63,6 +63,47 @@ export const account = functions.https.onCall(async (data, context) => {
     return tx.transactionId;
 })
 
+export const airdrop = functions.https.onRequest(async (request, response) => {
+    console.log(request.path);
+    const amount = 1.0;
+    const to = request.path.substring(1);
+
+    config({
+        'accessNode.api': process.env.API!
+    })
+
+    const cadence = `
+    import FungibleToken from 0x9a0766d93b6608b7
+    transaction(amount: UFix64, to: Address) {
+        let vault: @FungibleToken.Vault
+
+        prepare(signer: AuthAccount) {
+            self.vault <- signer
+                .borrow<&{FungibleToken.Provider}>(from: /storage/flowTokenVault)!
+                .withdraw(amount: amount)
+        }
+
+        execute {
+            getAccount(to)
+                .getCapability(/public/flowTokenReceiver)!
+                .borrow<&{FungibleToken.Receiver}>()!
+                .deposit(from: <-self.vault)
+        }
+    }
+    `
+    const tx = await send([
+        transaction(cadence),
+        args([arg(amount.toFixed(8), t.UFix64), arg(to, t.Address)]),
+        payer(authz),
+        proposer(authz),
+        authorizations([authz]),
+        limit(9999)
+    ]);
+
+    console.log(tx);
+    response.json(tx.transactionId);
+})
+
 const authz = async(account: any) => {
     return {
         ...account,
